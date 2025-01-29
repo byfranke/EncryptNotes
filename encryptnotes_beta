@@ -1,0 +1,257 @@
+#!/usr/bin/env python3
+
+import os
+import glob
+import getpass
+import argparse
+import datetime
+import sqlite3
+import hashlib
+import base64
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.backends import default_backend
+
+home = os.path.expanduser("~")
+db_dir = os.path.join(home, 'Documents', 'Database')
+db_path = os.path.join(db_dir, 'encryptnotes.db')
+if not os.path.exists(db_dir):
+    os.makedirs(db_dir)
+conn = sqlite3.connect(db_path)
+conn.execute('''
+CREATE TABLE IF NOT EXISTS notes (
+    id INTEGER PRIMARY KEY,
+    timestamp TEXT NOT NULL,
+    salt BLOB NOT NULL,
+    encrypted_note BLOB NOT NULL,
+    hashed_pass BLOB NOT NULL
+)
+''')
+conn.commit()
+
+def derive_key(password, salt):
+    kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=salt, iterations=100000, backend=default_backend())
+    return kdf.derive(password.encode())
+
+def encrypt_data(data, key):
+    return Fernet(base64.urlsafe_b64encode(key)).encrypt(data.encode())
+
+def decrypt_data(data, key):
+    return Fernet(base64.urlsafe_b64encode(key)).decrypt(data).decode()
+
+def add_note(note):
+    while True:
+        pwd = getpass.getpass("\nEnter the password: ")
+        cfm = getpass.getpass("Confirm the password: ")
+        if pwd == cfm:
+            now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            salt = os.urandom(16)
+            key = derive_key(pwd, salt)
+            enc = encrypt_data(note, key)
+            hsh = hashlib.sha256(pwd.encode()).digest()
+            conn.execute('INSERT INTO notes (timestamp,salt,encrypted_note,hashed_pass) VALUES (?,?,?,?)',(now,salt,enc,hsh))
+            conn.commit()
+            print("Note saved.")
+            return
+        else:
+            print("Passwords do not match.\n")
+
+def edit_note(idx, salt, enc, hsh):
+    old_pwd = getpass.getpass("Enter current password: ")
+    if hashlib.sha256(old_pwd.encode()).digest() != hsh:
+        print("Incorrect password.")
+        return
+    try:
+        key = derive_key(old_pwd, salt)
+        old_note = decrypt_data(enc, key)
+    except:
+        print("Decryption error.")
+        return
+    new_text = input("New content: ")
+    print("1 - Append\n2 - Replace")
+    c = input("Choose: ")
+    if c == '1':
+        updated = old_note + "\n" + new_text
+    elif c == '2':
+        updated = new_text
+    else:
+        print("Invalid option.")
+        return
+    npwd = getpass.getpass("New password (enter to keep same): ")
+    if not npwd:
+        nkey = key
+        nhsh = hsh
+    else:
+        cfm = getpass.getpass("Confirm new password: ")
+        if npwd != cfm:
+            print("Passwords do not match.")
+            return
+        salt = os.urandom(16)
+        nkey = derive_key(npwd, salt)
+        nhsh = hashlib.sha256(npwd.encode()).digest()
+    new_enc = encrypt_data(updated, nkey)
+    conn.execute('UPDATE notes SET salt=?, encrypted_note=?, hashed_pass=? WHERE id=?',(salt,new_enc,nhsh,idx))
+    conn.commit()
+    print("Note updated.")
+
+def delete_note(idx):
+    conn.execute('DELETE FROM notes WHERE id=?',(idx,))
+    conn.commit()
+    print(f"Note {idx} deleted.")
+
+def list_notes():
+    cur = conn.execute('SELECT id,timestamp FROM notes')
+    for r in cur:
+        print(f"{r[0]} - {r[1]}")
+    idx = input("Enter note ID to view (0=exit): ")
+    if not idx.isdigit():
+        print("Invalid ID.")
+        return
+    if int(idx)==0:
+        return
+    cur = conn.execute('SELECT salt,encrypted_note,hashed_pass FROM notes WHERE id=?',(idx,))
+    row = cur.fetchone()
+    if not row:
+        print("Not found.")
+        return
+    pwd = getpass.getpass("Password: ")
+    if hashlib.sha256(pwd.encode()).digest() != row[2]:
+        print("Incorrect password.")
+        return
+    try:
+        key = derive_key(pwd, row[0])
+        dec = decrypt_data(row[1], key)
+        print(f"\nNote {idx}:\n{dec}\n")
+    except:
+        print("Decryption error.")
+        return
+    print("1 - Edit\n2 - Delete\n3 - Export\n4 - Back")
+    o = input("Choose: ")
+    if o=='1':
+        edit_note(int(idx),row[0],row[1],row[2])
+    elif o=='2':
+        delete_note(int(idx))
+    elif o=='3':
+        p = input("Path (or enter for current dir): ")
+        if not p:
+            p = os.path.join(os.getcwd(), f"note_{idx}.txt")
+        try:
+            with open(p,'w') as f:
+                f.write(dec)
+            print(f"Exported to {p}.")
+        except Exception as e:
+            print(f"Error: {e}")
+
+def import_txt(path):
+    if os.path.isdir(path):
+        path = os.path.join(path,"*.txt")
+    files = glob.glob(path)
+    if not files:
+        print("No matches.")
+        return
+    text = []
+    for fp in sorted(files):
+        encs = ['utf-8','latin-1','ISO-8859-1','windows-1252']
+        c = None
+        for e in encs:
+            try:
+                with open(fp,'r',encoding=e) as f:
+                    c = f.read()
+                break
+            except:
+                pass
+        if c:
+            text.append(c)
+    joined = "\n\n".join(text).strip()
+    if not joined:
+        print("Import failed.")
+        return
+    add_note(joined)
+
+def search_note(args):
+    try:
+        nid = int(args[0])
+    except:
+        print("Invalid note ID.")
+        return
+    terms = args[1:]
+    c = conn.execute('SELECT salt,encrypted_note,hashed_pass FROM notes WHERE id=?',(nid,)).fetchone()
+    if not c:
+        print("Not found.")
+        return
+    pwd = getpass.getpass("Password: ")
+    if hashlib.sha256(pwd.encode()).digest() != c[2]:
+        print("Incorrect password.")
+        return
+    try:
+        k = derive_key(pwd,c[0])
+        txt = decrypt_data(c[1],k)
+    except:
+        print("Decryption error.")
+        return
+    combos = [
+        "".join(terms),
+        "".join(terms[::-1]),
+        ".".join(terms),
+        ".".join(terms[::-1])
+    ]
+    found = False
+    for combo in combos:
+        if combo in txt:
+            found = True
+            print(f"\nMatch for '{combo}':")
+            for line in txt.split("\n"):
+                if combo in line:
+                    print(line)
+    if not found:
+        print("No matches.")
+
+def main():
+    parser = argparse.ArgumentParser(description='Safe Notes')
+    parser.add_argument('-n','--new-note',action='store_true',help='Add new note')
+    parser.add_argument('-i','--import',type=str,help='Import .txt files')
+    parser.add_argument('-s','--search',nargs='+',help='Search in a note: -s <note_id> <terms>')
+    args = parser.parse_args()
+    if args.new_note:
+        nt = input("New note: ")
+        add_note(nt)
+        return
+    if args.import:
+        import_txt(args.import)
+        return
+    if args.search:
+        search_note(args.search)
+        return
+    while True:
+        print("""
+  ____|                                   |     \  |         |               
+  __|    __ \    __|   __|  |   |  __ \   __|    \ |   _ \   __|   _ \   __| 
+  |      |   |  (     |     |   |  |   |  |    |\  |  (   |  |     __/ \__ \ 
+ _____| _|  _| \___| _|    \__, |  .__/  \__| _| \_| \___/  \__| \___| ____/ 
+                           ____/  _|                                         
+
+github.com/byfranke v0.3
+""")
+        print("1 - New note\n2 - Import .txt\n3 - List notes\n4 - Exit")
+        o = input("Choose: ")
+        if o=='1':
+            nt = input("New note: ")
+            add_note(nt)
+        elif o=='2':
+            pt = input("Path: ")
+            import_txt(pt)
+        elif o=='3':
+            list_notes()
+        elif o=='4':
+            break
+        else:
+            print("Invalid option.")
+
+if __name__=='__main__':
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\nClosed.")
+        conn.close()
+        exit()
