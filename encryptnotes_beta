@@ -259,6 +259,16 @@ def main():
     while True:
         console.print("""
 [bold cyan]
+
+  ____|                                   |     \  |         |               
+  __|    __ \    __|   __|  |   |  __ \   __|    \ |   _ \   __|   _ \   __| 
+  |      |   |  (     |     |   |  |   |  |    |\  |  (   |  |     __/ \__ \ 
+ _____| _|  _| \___| _|    \__, |  .__/  \__| _| \_| \___/  \__| \___| ____/ 
+                           ____/  _|                                         
+
+                         github.com/byfranke Beta              
+
+
 1 - New note
 2 - List notes
 3 - Setup 2FA
