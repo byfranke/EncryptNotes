@@ -47,7 +47,7 @@ install_dependencies() {
     fi
 
     echo "[*] Installing required Python dependencies..."
-    pip3 install --upgrade cryptography sqlite3 argparse
+    pip3 install --upgrade cryptography sqlite3 argparse pyotp
     echo "[+] Dependencies installed."
 }
 
