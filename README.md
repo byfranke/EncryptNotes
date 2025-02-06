@@ -52,7 +52,7 @@ cd encryptnotes
 ```
 Step : 3 For installing tools in directory
 ```
-bash installer.sh
+bash setup.sh
 ```
 Step : 4 Run
 ```
