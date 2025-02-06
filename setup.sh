@@ -117,4 +117,5 @@ while true; do
 done
 }
 
+install_dependencies
 show_menu
