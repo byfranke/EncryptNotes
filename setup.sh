@@ -11,9 +11,9 @@ echo "|                             |"
 echo "|   ENCRYPTNOTES INSTALLER    |"
 echo "|_____________________________|"
 echo
-echo "   Secure and Encrypted Notes"
-echo "   GitHub: byfranke/EncryptNotes"
-echo "---------------------------------"
+echo "  Secure and Encrypted Notes"
+echo " GitHub: byfranke/EncryptNotes"
+echo "-------------------------------"
 }
 
 install_dependencies() {
