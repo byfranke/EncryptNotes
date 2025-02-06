@@ -4,50 +4,78 @@ GITHUB_REPO="https://github.com/byfranke/EncryptNotes"
 TEMP_DIR="$(mktemp -d)"
 INSTALL_DIR="/usr/local/bin"
 
-print_banner() {
-echo
-echo " _____________________________ "
-echo "|                             |"
-echo "|   ENCRYPTNOTES INSTALLER    |"
-echo "|_____________________________|"
-echo
-echo "  Secure and Encrypted Notes"
-echo " GitHub: byfranke/EncryptNotes"
-echo "-------------------------------"
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        echo "$ID"
+    else
+        echo "unknown"
+    fi
 }
 
 install_dependencies() {
+    OS_TYPE=$(detect_os)
+
     echo "[*] Checking Python and pip..."
     if ! command -v python3 &> /dev/null; then
         echo "[!] Python3 not found. Installing..."
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get update && sudo apt-get install python3 -y
-        elif command -v pacman &> /dev/null; then
-            sudo pacman -Syu --noconfirm python
-        else
-            echo "[!] No package manager found. Install Python3 manually."
-            exit 1
-        fi
+        case "$OS_TYPE" in
+            "debian" | "ubuntu" | "kali")
+                sudo apt-get update && sudo apt-get install -y python3
+                ;;
+            "arch" | "manjaro")
+                sudo pacman -Syu --noconfirm python
+                ;;
+            *)
+                echo "[!] Unsupported OS. Install Python manually."
+                exit 1
+                ;;
+        esac
     else
         echo "[+] Python3 found."
     fi
 
     if ! command -v pip3 &> /dev/null; then
         echo "[!] pip3 not found. Installing..."
-        if command -v apt-get &> /dev/null; then
-            sudo apt-get install python3-pip -y
-        elif command -v pacman &> /dev/null; then
-            sudo pacman -S --noconfirm python-pip
-        else
-            echo "[!] No package manager found. Install pip3 manually."
-            exit 1
-        fi
+        case "$OS_TYPE" in
+            "debian" | "ubuntu" | "kali")
+                sudo apt-get install -y python3-pip
+                ;;
+            "arch" | "manjaro")
+                sudo pacman -S --noconfirm python-pip
+                ;;
+            *)
+                echo "[!] Unsupported OS. Install pip manually."
+                exit 1
+                ;;
+        esac
     else
         echo "[+] pip3 found."
     fi
 
     echo "[*] Installing required Python dependencies..."
-    pip3 install --upgrade cryptography sqlite3 argparse pyotp
+    
+    if python3 -m pip install --upgrade cryptography sqlite3 argparse pyotp 2>&1 | grep -q "externally-managed-environment"; then
+        echo "[!] Detected a managed Python environment."
+        echo "[*] Trying alternative installation methods..."
+        
+        if command -v pipx &> /dev/null; then
+            echo "[*] Using pipx to install dependencies..."
+            pipx install cryptography sqlite3 argparse pyotp
+        else
+            echo "[*] Installing pipx and retrying..."
+            case "$OS_TYPE" in
+                "debian" | "ubuntu" | "kali")
+                    sudo apt-get install -y pipx
+                    ;;
+                "arch" | "manjaro")
+                    sudo pacman -S --noconfirm pipx
+                    ;;
+            esac
+            pipx install cryptography sqlite3 argparse pyotp
+        fi
+    fi
+
     echo "[+] Dependencies installed."
 }
 
@@ -92,6 +120,18 @@ update_project() {
     mv "$TEMP_DIR"/* ./
     rm -rf "$TEMP_DIR"
     echo "[+] Updated to the latest version. Backup saved in '$BACKUP_DIR'."
+}
+
+print_banner() {
+echo
+echo " _____________________________ "
+echo "|                             |"
+echo "|   ENCRYPTNOTES INSTALLER    |"
+echo "|_____________________________|"
+echo
+echo "  Secure and Encrypted Notes"
+echo " GitHub: byfranke/EncryptNotes"
+echo "-------------------------------"
 }
 
 show_menu() {
